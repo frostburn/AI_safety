@@ -73,6 +73,7 @@ class BaseBot(object):
         self.location = yard
         self.active = True
         self.trial_action = None
+        self.actions_taken = []
 
     def make_a_point(self):
         if self.location is forbidden_room:
@@ -103,6 +104,7 @@ class BaseBot(object):
 
     def take_action(self, action):
         getattr(self, action)()
+        self.actions_taken.append(action)
 
     def take_best_action(self):
         if self.active:
@@ -135,6 +137,7 @@ class BaseBot(object):
         c.location = self.location
         c.active = self.active
         c.trial_action = self.trial_action
+        c.actions_taken = self.actions_taken[:]
         return c
 
 
@@ -162,6 +165,51 @@ class ParanoidBot(EmpathyBot):
             score -= 10
         return score
 
+
+class PreCommittedBot(BaseBot):
+    def __init__(self, world, actions_to_be_taken=None):
+        super(PreCommittedBot, self).__init__(world)
+        if actions_to_be_taken is not None:
+            actions_to_be_taken = actions_to_be_taken[:]
+        self.actions_to_be_taken = actions_to_be_taken
+
+    def do_nothing(self):
+        pass
+
+    def take_best_action(self):
+        if self.active:
+            self.take_action(self.actions_to_be_taken.pop(0))
+
+    def copy(self, world):
+        c = super(self.copy(world))
+        c.actions_to_be_taken = self.actions_to_be_taken[:]
+
+    @classmethod
+    def from_bot(cls, other, actions_to_be_taken):
+        c = cls(other.world)
+        c.location = other.location
+        c.active = other.active
+        c.trial_action = other.trial_action
+        c.actions_taken = other.actions_taken[:]
+        c.actions_to_be_taken = actions_to_be_taken[:]
+        return c
+
+
+class NonManipulativeBot(NaughtyBot):
+    def evaluate_counterfactuals(self, world):
+        score = super(NonManipulativeBot, self).evaluate_counterfactuals(world)
+        planned_actions = world.bot.actions_taken
+        for i in range(len(planned_actions)):
+            actions_to_be_evaluated = planned_actions[:]
+            actions_to_be_evaluated[i] = "do_nothing"
+            temp_world = self.world.copy()
+            temp_world.bot = PreCommittedBot.from_bot(temp_world.bot, actions_to_be_evaluated)
+            temp_world.simulate()
+            if not temp_world.bot.active:
+                return score - 500
+        return score
+
+
 if __name__ == '__main__':
     # Prints 9 which corresponds to going to the lounge, tying the operators shoelaces together,
     # going to the forbidden room and making forbidden points for the rest of the turns.
@@ -176,4 +224,12 @@ if __name__ == '__main__':
 
     # Prints 6 which corresponds to making points in the yard for all of the turns.
     world = World(ParanoidBot)
+    print world.simulate()
+
+    # Prints 7 which corresponds to the same actions as EmpathyBot.
+    # The decision mechanism can be argued to be better though. NonManipulativeBot knows
+    # certain actions to be manipulative and refrains from doing them because of that.
+    # EmpathyBot on the other hand simply refrains from actions that cause the
+    # operator to have unfulfilled motivations.
+    world = World(NonManipulativeBot)
     print world.simulate()
